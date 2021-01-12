@@ -44,7 +44,7 @@ namespace Router {
 UpstreamRequest::UpstreamRequest(RouterFilterInterface& parent,
                                  std::unique_ptr<GenericConnPool>&& conn_pool)
     : parent_(parent), conn_pool_(std::move(conn_pool)), grpc_rq_success_deferred_(false),
-      stream_info_(parent_.callbacks()->dispatcher().timeSource()),
+      stream_info_(parent_.callbacks()->dispatcher().timeSource(), nullptr),
       start_time_(parent_.callbacks()->dispatcher().timeSource().monotonicTime()),
       calling_encode_headers_(false), upstream_canary_(false), decode_complete_(false),
       encode_complete_(false), encode_trailers_(false), retried_(false), awaiting_headers_(true),
@@ -207,7 +207,7 @@ void UpstreamRequest::encodeData(Buffer::Instance& data, bool end_stream) {
   if (!upstream_ || paused_for_connect_) {
     ENVOY_STREAM_LOG(trace, "buffering {} bytes", *parent_.callbacks(), data.length());
     if (!buffered_request_body_) {
-      buffered_request_body_ = std::make_unique<Buffer::WatermarkBuffer>(
+      buffered_request_body_ = parent_.callbacks()->dispatcher().getWatermarkFactory().create(
           [this]() -> void { this->enableDataFromDownstreamForFlowControl(); },
           [this]() -> void { this->disableDataFromDownstreamForFlowControl(); },
           []() -> void { /* TODO(adisuissa): Handle overflow watermark */ });
@@ -481,8 +481,8 @@ void UpstreamRequest::clearRequestEncoder() {
   // Before clearing the encoder, unsubscribe from callbacks.
   if (upstream_) {
     parent_.callbacks()->removeDownstreamWatermarkCallbacks(downstream_watermark_manager_);
-    parent_.callbacks()->dispatcher().deferredDelete(std::move(upstream_));
   }
+  upstream_.reset();
 }
 
 void UpstreamRequest::DownstreamWatermarkManager::onAboveWriteBufferHighWatermark() {
